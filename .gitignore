@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# PyTorch model checkpoints
+*.pth
+*.pt
+*.bin
+*.onnx
+
+# Dataset files (too large for git)
+*.xlsx
+*.csv
+*.tsv
+*.pkl
+*.pickle
+
+# Generated output images
+# (keep in repo for report reference)
+# *.png
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# OS files
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.nav
+*.snm
+*.vrb
+
+# Temporary files
+*.tmp
+*.temp
+git_info.txt
+git_check.txt
+test_output.txt
+git_log_out.txt
+git_remote_out.txt
+git_status_out.txt
+
+# Executables
+*.exe
