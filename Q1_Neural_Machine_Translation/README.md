@@ -18,7 +18,8 @@ Build a **Neural Machine Translation (NMT)** system that translates English sent
 Q1_Neural_Machine_Translation/
 │
 ├── code/
-│   └── Q1_Machine_Translation.py     # Complete Python implementation (all 9 tasks)
+│   ├── Q1_Machine_Translation.py     # Complete Python implementation (all 9 tasks)
+│   └── Generative_AI_Q1.ipynb        # Jupyter Notebook implementation
 │
 ├── report/
 │   ├── Q1_Machine_Translation_Report.tex   # LaTeX source (Springer LNCS format)
@@ -117,13 +118,16 @@ git clone https://github.com/code-with-idrees/Generative-AI-Assignment-1.git
 cd Generative-AI-Assignment-1/Q1_Neural_Machine_Translation/code
 
 # 2. Install dependencies
-pip install torch nltk pandas openpyxl unicodedata2
+pip install torch nltk pandas openpyxl unicodedata2 notebook
 
 # 3. Download dataset from Kaggle and place it in code/
 #    english_to_urdu_dataset.xlsx
 
 # 4. Run the full pipeline
 python Q1_Machine_Translation.py
+
+# Or run the notebook
+jupyter notebook Generative_AI_Q1.ipynb
 ```
 
 Or simply open in **Google Colab** and upload the dataset when prompted.

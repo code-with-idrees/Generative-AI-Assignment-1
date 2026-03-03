@@ -20,7 +20,8 @@ Generative-AI-Assignment-1/
 │
 ├── Q1_Neural_Machine_Translation/       # Question 1: NMT System
 │   ├── code/
-│   │   └── Q1_Machine_Translation.py   # Full implementation (all 9 tasks)
+│   │   ├── Q1_Machine_Translation.py   # Full implementation (all 9 tasks)
+│   │   └── Generative_AI_Q1.ipynb      # Jupyter Notebook version
 │   ├── report/
 │   │   ├── Q1_Machine_Translation_Report.tex    # LaTeX report (Springer LNCS)
 │   │   └── Neural_Machine_Translation_Report.pdf  # Compiled PDF
