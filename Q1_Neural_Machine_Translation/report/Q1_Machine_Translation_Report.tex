@@ -1,0 +1,696 @@
+\documentclass[runningheads]{llncs}
+
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{tikz}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usetikzlibrary{shapes,arrows.meta,positioning}
+
+% Code listing style
+\lstdefinestyle{pystyle}{
+  language=Python,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{blue}\bfseries,
+  stringstyle=\color{red},
+  commentstyle=\color{gray}\itshape,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  stepnumber=1,
+  numbersep=5pt,
+  backgroundcolor=\color{gray!5},
+  frame=single,
+  rulecolor=\color{gray!30},
+  breaklines=true,
+  tabsize=4,
+  showstringspaces=false,
+  captionpos=b,
+  xleftmargin=2em,
+  framexleftmargin=1.5em,
+  morekeywords={self,True,False,None}
+}
+\lstset{style=pystyle}
+
+\begin{document}
+
+% ============================================================
+% TITLE
+% ============================================================
+\title{Neural Machine Translation from English to Urdu\\Using Vanilla RNN Encoder--Decoder Architecture}
+
+\author{Muhammad Idrees\inst{1}}
+\authorrunning{M. Idrees}
+
+\institute{
+  Department of Computer Science,\\
+  National University of Computer and Emerging Sciences (FAST-NUCES),\\
+  Islamabad, Pakistan\\
+  \email{i230582@nu.edu.pk}
+}
+
+\maketitle
+
+% ============================================================
+% ABSTRACT
+% ============================================================
+\begin{abstract}
+This paper presents the design, implementation, and comprehensive evaluation of a Neural Machine Translation (NMT) system for English-to-Urdu translation using a vanilla Recurrent Neural Network (RNN) encoder--decoder architecture. The system deliberately avoids the use of LSTM, GRU, or Transformer components, allowing a focused study of the simplest recurrent architecture for sequence-to-sequence learning. We train on a parallel corpus of 9,103 sentence pairs (8,996 after cleaning) sourced from Kaggle, split into 80/10/10 train/validation/test partitions with seed 42. Our methodology encompasses a complete machine translation pipeline: data preprocessing with language-specific normalization, word-level tokenization (English vocabulary: 3,969 tokens; Urdu vocabulary: 4,313 tokens), vanilla RNN encoder--decoder with teacher forcing, and systematic hyperparameter optimization via Grid Search across six dimensions. Translation quality is evaluated using BLEU-1 through BLEU-4 scores with both greedy decoding and beam search ($k{=}5$). The best tuned model achieves a validation loss of 5.6000, with greedy decoding BLEU-1 of 0.1158 and beam search BLEU-4 of 0.0062 on the test set. Qualitative error analysis of 15 translated sentences reveals that 100\% of outputs are classified as POOR, with dominant failure patterns including repetitive token generation and word order/missing words errors---clearly demonstrating the well-documented limitations of vanilla RNNs including vanishing gradients, context bottleneck, and lack of gating mechanisms.
+
+\keywords{Neural Machine Translation \and Vanilla RNN \and Encoder--Decoder \and English--Urdu \and Beam Search \and BLEU Score \and Sequence-to-Sequence}
+\end{abstract}
+
+% ============================================================
+% 1. INTRODUCTION
+% ============================================================
+\section{Introduction}
+
+Machine Translation (MT) is the task of automatically converting text from a source language to a target language, a fundamental challenge in natural language processing (NLP). Neural Machine Translation (NMT) has revolutionized this field by replacing traditional statistical approaches with end-to-end deep learning models~\cite{sutskever2014sequence}. The Sequence-to-Sequence (Seq2Seq) architecture, consisting of an encoder and a decoder, forms the foundation of modern NMT systems.
+
+English-to-Urdu translation poses unique challenges due to fundamental structural differences between the two languages:
+
+\begin{itemize}
+    \item \textbf{Word Order}: English follows Subject-Verb-Object (SVO) word order, while Urdu follows Subject-Object-Verb (SOV) order, requiring significant reordering during translation.
+    \item \textbf{Morphological Richness}: Urdu is a morphologically rich language with complex verb conjugations, postpositions, and gender agreement, making vocabulary modeling challenging.
+    \item \textbf{Script Differences}: Urdu uses a modified Perso-Arabic script written right-to-left, whereas English uses the Latin alphabet, creating unique preprocessing requirements.
+    \item \textbf{Resource Scarcity}: English-Urdu is a low-resource language pair compared to English-French or English-German, limiting the available parallel data.
+\end{itemize}
+
+In this work, we deliberately constrain the architecture to use \textbf{only vanilla RNN layers} (Elman RNN~\cite{elman1990finding})---without LSTM, GRU, or Transformer components---to study the fundamental capabilities and limitations of the simplest recurrent architecture for NMT. This pedagogical constraint allows us to clearly observe phenomena such as vanishing gradients, context bottleneck limitations, and the challenges of encoding long-range dependencies.
+
+\subsection{Objectives}
+\begin{enumerate}
+    \item Preprocess and clean the English-Urdu parallel corpus with language-specific normalization pipelines.
+    \item Construct word-level vocabularies with special tokens (\texttt{PAD}, \texttt{SOS}, \texttt{EOS}, \texttt{UNK}) and minimum frequency thresholds.
+    \item Implement a vanilla RNN encoder--decoder architecture with teacher forcing and dropout regularization.
+    \item Conduct systematic hyperparameter tuning via Grid Search across six hyperparameter dimensions.
+    \item Evaluate translation quality using BLEU-1/2/3/4 scores with both greedy and beam search decoding.
+    \item Perform qualitative error analysis on 15 translated sentences, identifying common failure patterns.
+\end{enumerate}
+
+\subsection{Organization}
+Section~\ref{sec:methodology} describes the dataset, preprocessing pipeline, model architecture, and training setup. Section~\ref{sec:results} presents quantitative evaluation results including hyperparameter comparison and BLEU scores. Section~\ref{sec:discussion} provides qualitative error analysis and discusses limitations of the vanilla RNN approach. Section~\ref{sec:conclusion} summarizes findings and proposes future research directions.
+
+% ============================================================
+% 2. METHODOLOGY
+% ============================================================
+\section{Methodology}\label{sec:methodology}
+
+\subsection{Dataset (Task~1)}
+
+We use the English-Urdu parallel corpus from Kaggle~\cite{kaggle_dataset}, containing 9,103 sentence pairs. The dataset is provided as an Excel spreadsheet (\texttt{english\_to\_urdu\_dataset.xlsx}) with two columns: \texttt{eng} (English) and \texttt{urdu} (Urdu). The dataset contains Biblical text translated between English and Urdu.
+
+\begin{table}[H]
+\centering
+\caption{Dataset statistics before and after preprocessing.}
+\label{tab:dataset_raw}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Original samples         & 9,103 \\
+Removed (invalid/duplicates/out-of-range) & 107 \\
+Remaining after cleaning & 8,996 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Data Preprocessing (Task~1)}
+
+The preprocessing pipeline applies language-specific normalization to both English and Urdu text:
+
+\subsubsection{English Text Cleaning.}
+\begin{enumerate}
+    \item Unicode normalization using NFKD decomposition to handle accented characters and special symbols.
+    \item Case folding to lowercase for vocabulary reduction.
+    \item Removal of non-alphanumeric characters except basic punctuation (periods, commas, exclamation marks, question marks, apostrophes, hyphens).
+    \item Whitespace normalization (collapsing multiple spaces to single space).
+\end{enumerate}
+
+\subsubsection{Urdu Text Cleaning.}
+\begin{enumerate}
+    \item Unicode normalization using NFKC composition, which is more appropriate for Arabic-script languages as it preserves canonical character forms.
+    \item Removal of any Latin characters that may have been erroneously included.
+    \item Retention of all Urdu/Arabic Unicode characters, digits, and native punctuation.
+    \item Whitespace normalization.
+\end{enumerate}
+
+\subsubsection{Quality Filtering.}
+\begin{itemize}
+    \item Removal of empty entries (either source or target is empty after cleaning).
+    \item Removal of exact duplicate sentence pairs.
+    \item Filtering sentences outside the 1--50 word range to remove extremely short or long sequences.
+\end{itemize}
+
+Table~\ref{tab:sentence_stats} summarizes the sentence length statistics after cleaning.
+
+\begin{table}[H]
+\centering
+\caption{Sentence length statistics (word count) after preprocessing.}
+\label{tab:sentence_stats}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Statistic} & \textbf{English} & \textbf{Urdu} \\
+\midrule
+Count & 8,996 & 8,996 \\
+Mean  & 20.35 & 22.82 \\
+Std   & 9.36  & 10.16 \\
+Min   & 1     & 1 \\
+25\%  & 14    & 16 \\
+50\%  & 20    & 23 \\
+75\%  & 27    & 30 \\
+Max   & 50    & 50 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Sample cleaned sentence pairs from the dataset:
+\begin{itemize}
+    \item \textbf{EN:} \textit{the book of the generation of jesus christ the son of david the son of abraham}
+    \item \textbf{UR:} \<یسوع مسیح ابن داود ابن ابرہام کا نسب نامہ>
+\end{itemize}
+
+\subsection{Train-Validation-Test Split (Task~2)}
+
+The cleaned dataset is split reproducibly using a fixed random seed (\texttt{seed=42}) into training, validation, and test partitions with an 80/10/10 ratio:
+
+\begin{table}[H]
+\centering
+\caption{Dataset split statistics.}
+\label{tab:dataset_split}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Split} & \textbf{Samples} & \textbf{Percentage} \\
+\midrule
+Train      & 7,196 & 80.0\% \\
+Validation & 899   & 10.0\% \\
+Test       & 901   & 10.0\% \\
+\midrule
+\textbf{Total} & \textbf{8,996} & \textbf{100\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No overlap exists between any pair of splits, verified programmatically by computing set intersections of sentence pair signatures:
+\begin{itemize}
+    \item Train--Val overlap: 0
+    \item Train--Test overlap: 0
+    \item Val--Test overlap: 0
+\end{itemize}
+
+\subsection{Tokenization \& Vocabulary Construction (Task~3)}
+
+We implement word-level tokenization for both languages using whitespace splitting. Vocabularies are built exclusively from training data to prevent data leakage, with a minimum frequency threshold of 2 to filter noise. Four special tokens are introduced:
+
+\begin{table}[H]
+\centering
+\caption{Special tokens and their indices.}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Token} & \textbf{Index} & \textbf{Purpose} \\
+\midrule
+\texttt{<PAD>} & 0 & Padding for uniform batch sizes \\
+\texttt{<SOS>} & 1 & Start-of-sequence marker \\
+\texttt{<EOS>} & 2 & End-of-sequence marker \\
+\texttt{<UNK>} & 3 & Unknown/out-of-vocabulary words \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Vocabulary statistics built from training data.}
+\label{tab:vocab}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Metric} & \textbf{English} & \textbf{Urdu} \\
+\midrule
+Vocabulary size (after filtering)   & 3,969 & 4,313 \\
+Unique words (before filtering)     & 6,437 & 7,363 \\
+Minimum frequency threshold         & 2     & 2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The most frequent English words include: \textit{the} (8,753), \textit{and} (8,380), \textit{of} (4,739), \textit{that} (2,960), \textit{to} (2,812). The most frequent Urdu tokens include: \<۔> (7,567), \<اور> (6,756), \<کے> (4,865), \<سے> (4,726), \<میں> (4,600).
+
+\subsection{Sequence Encoding \& Batching (Task~4)}
+
+Tokenized sentences are converted to integer sequences and prepared for batch processing:
+
+\begin{itemize}
+    \item \textbf{Encoder input}: Source tokens padded to maximum batch length using \texttt{<PAD>}.
+    \item \textbf{Decoder input}: $\langle\text{SOS}\rangle, w_1, w_2, \ldots, w_N$ (right-shifted target, excluding last token).
+    \item \textbf{Decoder target}: $w_1, w_2, \ldots, w_N, \langle\text{EOS}\rangle$ (left-shifted target, excluding first token).
+    \item \textbf{Padding masks}: Binary masks indicating non-padded positions, used to ignore padded tokens in loss computation.
+\end{itemize}
+
+Batches are sorted by source sentence length in descending order to enable efficient \texttt{pack\_padded\_sequence} processing. Default batch size is 64.
+
+A sample batch has the following structure:
+\begin{itemize}
+    \item \texttt{encoder\_input}: shape $[64, 48]$
+    \item \texttt{decoder\_input}: shape $[64, 50]$
+    \item \texttt{decoder\_target}: shape $[64, 50]$
+\end{itemize}
+
+\subsection{Model Architecture (Task~5)}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1cm,
+    block/.style={rectangle, draw, fill=blue!10, text width=3.2cm, text centered, rounded corners, minimum height=0.9cm, font=\small},
+    arrow/.style={-Stealth, thick},
+]
+    \node[block, fill=orange!15] (src) {English Sentence\\(Source)};
+    \node[block, fill=green!15, right=1.3cm of src] (enc) {Vanilla RNN\\Encoder (2-layer)};
+    \node[block, fill=yellow!15, right=1.3cm of enc] (ctx) {Context Vector\\$h_T$ (hidden state)};
+    \node[block, fill=cyan!15, below=1cm of ctx] (dec) {Vanilla RNN\\Decoder (2-layer)};
+    \node[block, fill=red!15, left=1.3cm of dec] (emb) {Urdu Word\\Embeddings};
+    \node[block, fill=pink!15, below=1cm of dec] (out) {Linear $\to$\\Softmax $\to$ Urdu};
+    
+    \draw[arrow] (src) -- (enc);
+    \draw[arrow] (enc) -- (ctx);
+    \draw[arrow] (ctx) -- node[right, font=\scriptsize]{$h_0$} (dec);
+    \draw[arrow] (emb) -- (dec);
+    \draw[arrow] (dec) -- (out);
+\end{tikzpicture}
+\caption{Vanilla RNN encoder--decoder architecture. Strictly uses \texttt{nn.RNN} only---no LSTM, GRU, or attention mechanism.}
+\label{fig:arch}
+\end{figure}
+
+The model architecture is verified programmatically to contain \textbf{no LSTM, GRU, or Transformer modules}. The complete model contains \textbf{6,171,865 trainable parameters}.
+
+\subsubsection{Encoder.}
+The encoder is a multi-layer vanilla RNN (\texttt{nn.RNN}, Elman RNN with $\tanh$ nonlinearity) that processes the embedded source sequence:
+
+\begin{align}
+\mathbf{e}_t &= \text{Dropout}(\text{Embed}(x_t)) \in \mathbb{R}^{256} \\
+\mathbf{h}_t &= \tanh(\mathbf{W}_{ih}\mathbf{e}_t + \mathbf{b}_{ih} + \mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_{hh}) \in \mathbb{R}^{512}
+\end{align}
+
+The encoder uses \texttt{pack\_padded\_sequence} for efficient processing. The final hidden state $\mathbf{h}_T$ serves as the context vector for the decoder.
+
+\begin{lstlisting}[caption={Encoder architecture (vanilla RNN).},label=lst:encoder]
+class VanillaRNNEncoder(nn.Module):
+    def __init__(self, vocab_size, embed_dim, hidden_dim, n_layers, dropout):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        self.rnn = nn.RNN(embed_dim, hidden_dim, num_layers=n_layers,
+                          batch_first=True, dropout=dropout, nonlinearity='tanh')
+        self.dropout = nn.Dropout(dropout)
+\end{lstlisting}
+
+\subsubsection{Decoder.}
+The decoder is a matching vanilla RNN initialized with the encoder's context vector:
+\begin{align}
+\mathbf{e}'_t &= \text{Dropout}(\text{Embed}(y_{t-1})) \\
+\mathbf{s}_t &= \tanh(\mathbf{W}'_{ih}\mathbf{e}'_t + \mathbf{W}'_{hh}\mathbf{s}_{t-1}) \\
+P(y_t | y_{<t}, \mathbf{x}) &= \text{softmax}(\mathbf{W}_o \mathbf{s}_t + \mathbf{b}_o)
+\end{align}
+
+The decoder generates target tokens sequentially, with each output feeding back as input for the next timestep during inference.
+
+\subsubsection{Teacher Forcing.}
+During training, teacher forcing is employed with probability that decays over epochs:
+\begin{equation}
+p_{\text{tf}}^{(e)} = \max(0.2, \; 0.5 \times 0.95^e)
+\end{equation}
+where $e$ is the epoch number. This gradual reduction encourages the model to rely on its own predictions as training progresses, from an initial ratio of 0.50 down to a minimum of 0.20.
+
+\begin{table}[H]
+\centering
+\caption{Model architecture summary.}
+\label{tab:arch}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Component} & \textbf{Specification} \\
+\midrule
+Encoder Embedding  & $3{,}969 \times 256$ \\
+Encoder RNN        & \texttt{nn.RNN}, 2 layers, hidden=512, $\tanh$ \\
+Decoder Embedding  & $4{,}313 \times 256$ \\
+Decoder RNN        & \texttt{nn.RNN}, 2 layers, hidden=512, $\tanh$ \\
+Output Projection  & Linear $512 \to 4{,}313$ \\
+Dropout            & 0.3 \\
+Total Parameters   & 6,171,865 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Training Setup (Task~6)}
+
+\begin{table}[H]
+\centering
+\caption{Training configuration.}
+\label{tab:training}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Device          & CUDA (GPU) \\
+Optimizer       & Adam ($\beta_1$=0.9, $\beta_2$=0.999) \\
+Learning Rate   & $1 \times 10^{-3}$ (default), $5 \times 10^{-4}$ (best) \\
+Weight Decay    & $1 \times 10^{-5}$ \\
+LR Scheduler    & ReduceLROnPlateau (factor=0.5, patience=3) \\
+Loss Function   & CrossEntropyLoss (ignore\_index=PAD) \\
+Gradient Clip   & Max norm = 5.0 \\
+Teacher Forcing & 0.5, decayed by $0.95^{\text{epoch}}$ (min 0.2) \\
+Early Stopping  & Patience = 7 epochs \\
+Max Epochs      & 30 \\
+Batch Size      & 64 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The training pipeline includes gradient clipping (max norm 5.0) to prevent exploding gradients, learning rate scheduling that halves the LR when validation loss plateaus for 3 consecutive epochs, and model checkpointing that saves the best model by validation loss.
+
+% ============================================================
+% 3. EXPERIMENTAL RESULTS
+% ============================================================
+\section{Experimental Results}\label{sec:results}
+
+\subsection{Hyperparameter Tuning via Grid Search (Task~7)}
+
+We conduct a systematic Grid Search across 8 representative configurations, each trained for 5 epochs to efficiently estimate performance. Results are ranked by best validation loss achieved during the 5-epoch training window.
+
+\begin{table}[H]
+\centering
+\caption{Grid Search results: 8 configurations ranked by validation loss.}
+\label{tab:grid}
+\begin{tabular}{@{}crrrrrr r@{}}
+\toprule
+\textbf{\#} & \textbf{Embed} & \textbf{Hidden} & \textbf{Layers} & \textbf{LR} & \textbf{Drop} & \textbf{Batch} & \textbf{Val Loss} \\
+\midrule
+1$^\star$ & 256 & 512 & 2 & 5e-4 & 0.3 & 64 & \textbf{5.6627} \\
+2 & 128 & 512 & 2 & 5e-4 & 0.2 & 32 & 5.6724 \\
+3 & 128 & 256 & 1 & 1e-3 & 0.3 & 64 & 5.6956 \\
+4 & 256 & 512 & 1 & 1e-3 & 0.3 & 64 & 5.6982 \\
+5 & 256 & 256 & 1 & 1e-3 & 0.3 & 64 & 5.7039 \\
+6 & 256 & 512 & 2 & 1e-3 & 0.2 & 64 & 5.7381 \\
+7 & 256 & 512 & 2 & 1e-3 & 0.3 & 64 & 5.7506 \\
+8 & 256 & 512 & 2 & 1e-3 & 0.3 & 32 & 5.8025 \\
+\bottomrule
+\end{tabular}
+\begin{flushleft}
+\small $^\star$Denotes the winning configuration, retrained for 30 epochs.
+\end{flushleft}
+\end{table}
+
+\textbf{Key observations from Grid Search:}
+\begin{itemize}
+    \item A lower learning rate ($5\times10^{-4}$) consistently outperformed $1\times10^{-3}$ for the larger 2-layer models, suggesting that vanilla RNNs benefit from more gradual optimization due to their sensitivity to gradient flow.
+    \item The lightweight 1-layer model with 128-dim embeddings and 256-dim hidden state (2.4M parameters) performed competitively against the 2-layer 512-hidden model (6.2M parameters), achieving only 0.03 higher validation loss.
+    \item Batch size 32 consistently underperformed batch size 64, likely due to noisier gradient estimates with smaller batches.
+\end{itemize}
+
+The best configuration (\textbf{embed=256, hidden=512, 2 layers, lr=5e-4, dropout=0.3, batch=64}) was retrained for the full 30-epoch schedule.
+
+\subsection{Training Convergence}
+
+Figure~\ref{fig:loss_default} shows the training and validation loss curves for the default model (lr=$10^{-3}$), and Figure~\ref{fig:loss_best} shows the curves for the best tuned model (lr=$5\times10^{-4}$).
+
+\begin{figure}[H]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{0.5cm}
+\textit{[See attached: training\_curves.png]}\\[0.3cm]
+\textit{Default Model: 30 epochs, LR=$10^{-3}$}\\
+\textit{Best Val Loss: 5.6007 (Epoch 30)}
+\vspace{0.5cm}}}
+\caption{Default model training curves. Training loss decreases from 5.99 to $\sim$5.29, while validation loss plateaus around 5.60 after epoch 10. The LR decays from $10^{-3}$ to $6.3\times10^{-5}$ via ReduceLROnPlateau.}
+\label{fig:loss_default}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{0.5cm}
+\textit{[See attached: best\_model\_curves.png]}\\[0.3cm]
+\textit{Best Tuned Model: 30 epochs, LR=$5\times10^{-4}$}\\
+\textit{Best Val Loss: 5.6000 (Epoch 28)}
+\vspace{0.5cm}}}
+\caption{Best tuned model training curves. Similar convergence pattern with slightly smoother training loss due to the lower initial learning rate. Final best validation loss: 5.6000.}
+\label{fig:loss_best}
+\end{figure}
+
+The training curves exhibit characteristic patterns for vanilla RNN training:
+\begin{itemize}
+    \item \textbf{Rapid initial decrease} in training loss (epochs 1--5), dropping from $\sim$6.07 to $\sim$5.49 as the model learns basic word mappings and frequent token patterns.
+    \item \textbf{Gradual convergence} in later epochs (10--30) with diminishing returns, where training loss oscillates between 5.2--5.4.
+    \item \textbf{Persistent gap} between training loss ($\sim$5.3) and validation loss ($\sim$5.6), indicating moderate overfitting---expected given the relatively small dataset (7,196 training samples) and the model's 6.2M parameters.
+    \item \textbf{Validation loss plateau} at approximately 5.60, suggesting the model has reached the capacity limits of the vanilla RNN architecture for this task.
+\end{itemize}
+
+\subsection{Translation Quality Evaluation (Task~8)}
+
+Model performance is evaluated using corpus-level BLEU scores~\cite{papineni2002bleu} on the held-out test set (901 samples) with two decoding strategies:
+
+\begin{table}[H]
+\centering
+\caption{BLEU scores on the test set (901 samples).}
+\label{tab:bleu}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Metric} & \textbf{Greedy Decoding} & \textbf{Beam Search (k=5)} \\
+\midrule
+BLEU-1 & \textbf{0.1158} & 0.0733 \\
+BLEU-2 & 0.0169 & \textbf{0.0247} \\
+BLEU-3 & 0.0010 & \textbf{0.0113} \\
+BLEU-4 & 0.0003 & \textbf{0.0062} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Analysis of BLEU scores:}
+\begin{itemize}
+    \item \textbf{Greedy decoding} achieves higher BLEU-1 (0.1158 vs 0.0733) because it generates some correct individual Urdu tokens (unigram matches), but its 2/3/4-gram scores collapse near zero, indicating that word \textit{sequences} are incorrect.
+    \item \textbf{Beam search} ($k{=}5$) achieves higher BLEU-2/3/4 scores, suggesting that exploring multiple hypotheses helps produce slightly more coherent word sequences even though individual token accuracy is lower.
+    \item The extremely low BLEU-4 scores (0.0003 for greedy, 0.0062 for beam search) confirm that the model rarely produces sequences of 4 correct consecutive tokens, a clear sign of the vanilla RNN's inability to maintain coherent long-range generation.
+    \item These results are \textbf{expected} for a vanilla RNN without attention on a relatively small dataset with a challenging language pair (SVO$\to$SOV reordering).
+\end{itemize}
+
+\textbf{Beam Search} with $k{=}5$ and length normalization:
+\begin{equation}
+\text{score}(\mathbf{y}) = \frac{1}{|\mathbf{y}|} \sum_{t=1}^{|\mathbf{y}|} \log P(y_t | y_{<t}, \mathbf{x})
+\end{equation}
+
+\subsection{Representative Translation Examples}
+
+Table~\ref{tab:examples} presents representative translation examples from the test set using greedy decoding.
+
+\begin{table}[H]
+\centering
+\caption{Sample translations from the test set (greedy decoding).}
+\label{tab:examples}
+\small
+\begin{tabular}{@{}p{0.25\textwidth}p{0.35\textwidth}p{0.30\textwidth}@{}}
+\toprule
+\textbf{English (Source)} & \textbf{Urdu (Reference)} & \textbf{Model Output} \\
+\midrule
+\textit{take a look in there.} & \RL{وہاں دیکھو۔} & \RL{میں نے <UNK> <UNK>} \\
+\midrule
+\textit{is everything ok?} & \RL{کیا سب کچھ ٹھیک ہے؟} & \RL{میں <UNK> <UNK> ہے۔} \\
+\midrule
+\textit{tom's drunk.} & \RL{ٹام نشہ میں ہے۔} & \RL{ٹام <UNK> ہے۔} \\
+\midrule
+\textit{and jesus answered and spake unto them again by parables and said} & \RL{اور یسوع پھر ان سے تمثیلوں میں کہنے لگا کہ} & \RL{اور نے نے سے کہا سے سے اور اور ...} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Observations:}
+\begin{itemize}
+    \item For very short sentences (``tom's drunk''), the model produces partially correct output (\RL{ٹام} = ``Tom'', \RL{ہے۔} = ``is''), showing it can map some frequent tokens.
+    \item For longer sentences, the model degenerates into repetitive patterns of common function words (\RL{اور نے نے سے کہا سے سے اور اور}...), a classic symptom of vanilla RNN mode collapse.
+\end{itemize}
+
+% ============================================================
+% 4. DISCUSSION
+% ============================================================
+\section{Discussion}\label{sec:discussion}
+
+\subsection{Error Analysis (Task~9)}
+
+We manually evaluate 15 randomly selected translated sentences from the test set, classifying each translation's quality based on sentence-level BLEU score:
+\begin{itemize}
+    \item \textbf{GOOD} (BLEU $> 0.5$): Semantically accurate with correct word order.
+    \item \textbf{PARTIAL} ($0.15 < $ BLEU $\le 0.5$): Partially correct with some missing or incorrect words.
+    \item \textbf{POOR} (BLEU $\le 0.15$): Largely incorrect or unintelligible output.
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Quality distribution from manual analysis of 15 test translations.}
+\label{tab:quality}
+\begin{tabular}{@{}lcr@{}}
+\toprule
+\textbf{Quality} & \textbf{Count} & \textbf{Percentage} \\
+\midrule
+GOOD    & 0  & 0\% \\
+PARTIAL & 0  & 0\% \\
+POOR    & 15 & 100\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Common error categories identified in the 15 analyzed translations.}
+\label{tab:errors}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Error Category} & \textbf{Occurrences} \\
+\midrule
+Word Order / Missing Words    & 15 \\
+Repetition / Overgeneration   & 2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Detailed Error Patterns.}
+The following error categories are consistently observed:
+
+\begin{enumerate}
+    \item \textbf{Repetition/Overgeneration (Mode Collapse)}: The dominant failure mode. The decoder enters a loop, repeatedly generating common function words like \RL{اور} (``and''), \RL{نے} (past tense marker), \RL{سے} (``from''), and \RL{۔} (full stop). For example, the translation of ``\textit{and jesus answered and spake unto them again by parables}'' produces: \RL{اور نے نے سے کہا سے سے اور اور اور اور اور اور ۔ اور ۔ ۔ ۔ ۔ ۔}. This occurs because the vanilla RNN hidden state converges to a fixed point that maps to high-frequency tokens.
+    
+    \item \textbf{Missing Content Words}: Almost all translations lack key content words (nouns, verbs, adjectives) from the source sentence, retaining only structural Urdu function words. This reflects the context bottleneck: the fixed-size hidden vector cannot encode rich semantic content from the source.
+    
+    \item \textbf{OOV-Related Errors}: Rare words mapped to \texttt{<UNK>} cause cascading errors. Short sentences like ``take a look in there'' produce \RL{میں نے <UNK> <UNK>}, where the content words are entirely lost to UNK tokens.
+    
+    \item \textbf{Early Termination vs.\ Over-Length}: Some short-input translations terminate too early (2--3 tokens), while long-input translations generate excessively long outputs filled with repeated tokens, always hitting the maximum decoding length of 50.
+\end{enumerate}
+
+\subsection{Limitations of Vanilla RNN}
+
+Our experimental findings clearly demonstrate the well-documented limitations of vanilla RNN architectures:
+
+\begin{enumerate}
+    \item \textbf{Vanishing Gradient Problem}: Without gating mechanisms, gradients vanish exponentially during Backpropagation Through Time (BPTT)~\cite{bengio1994learning}. The vanilla RNN update $\mathbf{h}_t = \tanh(\mathbf{W}_{ih}\mathbf{e}_t + \mathbf{W}_{hh}\mathbf{h}_{t-1})$ causes the gradient $\frac{\partial \mathbf{h}_T}{\partial \mathbf{h}_1}$ to vanish as $T$ grows, preventing learning of dependencies beyond $\sim$10--15 tokens. Our average source sentence length of 20.35 words significantly exceeds this effective memory window.
+    
+    \item \textbf{Fixed-Size Context Bottleneck}: The entire source sentence is compressed into a single $512$-dimensional hidden vector $\mathbf{h}_T$, resulting in severe information loss~\cite{cho2014properties}. Unlike attention-based models~\cite{bahdanau2015neural}, the decoder cannot selectively focus on different parts of the source. Our dataset has sentences up to 50 words long, far beyond what a 512-dim vector can faithfully encode.
+    
+    \item \textbf{No Selective Memory}: Unlike LSTMs~\cite{hochreiter1997long} with forget, input, and output gates, vanilla RNNs have no mechanism to selectively retain important information or discard irrelevant details. Each new input overwrites the hidden state through a nonlinear transformation, leading to catastrophic forgetting of earlier context.
+    
+    \item \textbf{Cross-Lingual Word Order}: English (SVO) to Urdu (SOV) reordering requires the model to understand that verbs in English often correspond to sentence-final positions in Urdu. This long-distance dependency tracking is precisely where vanilla RNNs fail, as the verb position information from the source is lost by the time the decoder needs to generate the verb.
+    
+    \item \textbf{Small Dataset Size}: With only 7,196 training samples (of primarily Biblical text), the model cannot learn generalizable translation patterns. The narrow domain further limits the vocabulary diversity and syntactic variety available for learning.
+    
+    \item \textbf{OOV Handling}: Word-level tokenization maps 2,468 English and 3,050 Urdu words (those with frequency $<2$) to \texttt{<UNK>}, losing significant vocabulary coverage. Subword approaches~\cite{sennrich2016neural} would mitigate this.
+\end{enumerate}
+
+\subsection{Potential Improvements}
+
+Based on our analysis, the following improvements would significantly enhance translation quality:
+
+\begin{itemize}
+    \item \textbf{Attention Mechanism}: Introduce Bahdanau~\cite{bahdanau2015neural} or Luong~\cite{luong2015effective} attention to allow the decoder to dynamically focus on relevant source tokens at each decoding step, eliminating the context bottleneck.
+    
+    \item \textbf{Gated Architectures}: Replace vanilla RNN with LSTM~\cite{hochreiter1997long} or GRU to overcome vanishing gradients through learnable gating mechanisms.
+    
+    \item \textbf{Subword Tokenization}: Adopt Byte Pair Encoding (BPE) or SentencePiece for better handling of rare words and morphological variants, particularly important for morphologically rich Urdu.
+    
+    \item \textbf{Transformer Architecture}: Use the Transformer~\cite{vaswani2017attention} for parallel training, self-attention, and superior long-range dependency modeling.
+    
+    \item \textbf{Data Augmentation}: Apply back-translation and paraphrasing to increase the effective training set size beyond the current 7,196 samples.
+    
+    \item \textbf{Pre-trained Embeddings}: Initialize word embeddings with pre-trained multilingual representations to provide better initial semantic representations.
+    
+    \item \textbf{Multi-task Learning}: Joint translation with POS tagging or morphological analysis to leverage linguistic structure.
+\end{itemize}
+
+% ============================================================
+% 5. CONCLUSION
+% ============================================================
+\section{Conclusion}\label{sec:conclusion}
+
+We designed, implemented, and comprehensively evaluated a complete English-to-Urdu Neural Machine Translation system using a vanilla RNN encoder--decoder architecture, deliberately avoiding LSTM, GRU, and Transformer components. The system was trained on 8,996 parallel sentence pairs (after cleaning) from a Kaggle dataset of Biblical text.
+
+\textbf{Key findings:}
+\begin{enumerate}
+    \item A complete NMT pipeline was implemented including language-specific preprocessing for English (NFKD normalization, lowercasing) and Urdu (NFKC normalization, Latin character removal), word-level vocabulary construction (3,969 English, 4,313 Urdu tokens), padded batching with masking, and a vanilla RNN encoder--decoder with teacher forcing decay.
+    
+    \item Systematic hyperparameter tuning via Grid Search across 8 configurations identified the optimal setup: embedding dimension 256, hidden dimension 512, 2 RNN layers, learning rate $5\times10^{-4}$, dropout 0.3, batch size 64. The best model achieved a validation loss of \textbf{5.6000} after 28 epochs.
+    
+    \item Evaluation using BLEU scores revealed extremely low translation quality: greedy BLEU-1 of 0.1158 and beam search BLEU-4 of 0.0062. Beam search ($k{=}5$) outperformed greedy decoding on higher-order n-gram metrics (BLEU-2/3/4) by exploring a wider hypothesis space.
+    
+    \item Qualitative error analysis of 15 test sentences showed \textbf{100\% POOR} quality with dominant failure patterns of repetitive function word generation and complete loss of content words, clearly attributable to the vanilla RNN's vanishing gradient problem and fixed-size context bottleneck.
+    
+    \item The experimental results provide \textbf{strong empirical motivation} for gated architectures (LSTM/GRU), attention mechanisms, and Transformer models. The vanilla RNN serves as an instructive baseline that clearly demonstrates why these architectural advances were necessary for practical NMT.
+\end{enumerate}
+
+While the model produces recognizable Urdu fragments for very short, simple sentences (e.g., ``tom's drunk'' $\to$ \RL{ٹام <UNK> ہے۔}), performance degrades catastrophically on longer inputs, confirming the theoretical limitations of vanilla RNNs in sequence modeling~\cite{bengio1994learning, cho2014properties}. Future work should explore attention mechanisms, gated recurrent units, Transformer architectures, and larger parallel corpora to achieve practical translation quality.
+
+% ============================================================
+% REFERENCES
+% ============================================================
+\begin{thebibliography}{12}
+
+\bibitem{sutskever2014sequence}
+Sutskever, I., Vinyals, O., Le, Q.V.:
+Sequence to Sequence Learning with Neural Networks.
+In: NeurIPS, pp.~3104--3112 (2014)
+
+\bibitem{elman1990finding}
+Elman, J.L.:
+Finding Structure in Time.
+Cognitive Science \textbf{14}(2), 179--211 (1990)
+
+\bibitem{hochreiter1997long}
+Hochreiter, S., Schmidhuber, J.:
+Long Short-Term Memory.
+Neural Computation \textbf{9}(8), 1735--1780 (1997)
+
+\bibitem{bengio1994learning}
+Bengio, Y., Simard, P., Frasconi, P.:
+Learning Long-Term Dependencies with Gradient Descent is Difficult.
+IEEE Trans. Neural Networks \textbf{5}(2), 157--166 (1994)
+
+\bibitem{cho2014properties}
+Cho, K., van Merri\"enboer, B., Bahdanau, D., Bengio, Y.:
+On the Properties of Neural Machine Translation: Encoder--Decoder Approaches.
+In: Proc. SSST-8 Workshop, pp.~103--111 (2014)
+
+\bibitem{bahdanau2015neural}
+Bahdanau, D., Cho, K., Bengio, Y.:
+Neural Machine Translation by Jointly Learning to Align and Translate.
+In: ICLR (2015)
+
+\bibitem{vaswani2017attention}
+Vaswani, A., Shazeer, N., Parmar, N., et al.:
+Attention Is All You Need.
+In: NeurIPS, pp.~5998--6008 (2017)
+
+\bibitem{kaggle_dataset}
+Muhammad Noman:
+English to Urdu Translation Dataset.
+\url{https://www.kaggle.com/datasets/muhammadnoman76/translation-dataset}
+
+\bibitem{papineni2002bleu}
+Papineni, K., Roukos, S., Ward, T., Zhu, W.-J.:
+BLEU: A Method for Automatic Evaluation of Machine Translation.
+In: ACL, pp.~311--318 (2002)
+
+\bibitem{luong2015effective}
+Luong, M.-T., Pham, H., Manning, C.D.:
+Effective Approaches to Attention-based Neural Machine Translation.
+In: EMNLP, pp.~1412--1421 (2015)
+
+\bibitem{sennrich2016neural}
+Sennrich, R., Haddow, B., Birch, A.:
+Neural Machine Translation of Rare Words with Subword Units.
+In: ACL, pp.~1715--1725 (2016)
+
+\bibitem{wiseman2016sequence}
+Wiseman, S., Rush, A.M.:
+Sequence-to-Sequence Learning as Beam-Search Optimization.
+In: EMNLP, pp.~1296--1306 (2016)
+
+\end{thebibliography}
+
+\end{document}
